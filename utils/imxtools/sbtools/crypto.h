@@ -30,6 +30,8 @@
 extern "C" {
 #endif
 
+typedef uint8_t byte;
+
 /* crypto.cpp */
 enum crypto_method_t
 {
@@ -50,7 +52,7 @@ struct crypto_key_t
     enum crypto_method_t method;
     union
     {
-        uint8_t key[16];
+        byte key[16];
         union xorcrypt_key_t xor_key[2];
     }u;
 };
@@ -66,29 +68,28 @@ int crypto_setup(struct crypto_key_t *key);
 
 /* return 0 on success, <0 on error */
 int crypto_apply(
-    uint8_t *in_data, /* Input data */
-    uint8_t *out_data, /* Output data (or NULL) */
+    byte *in_data, /* Input data */
+    byte *out_data, /* Output data (or NULL) */
     int nr_blocks, /* Number of blocks (one block=16 bytes) */
-    uint8_t iv[16], /* IV */
-    uint8_t (*out_cbc_mac)[16], /* CBC-MAC of the result (or NULL) */
+    byte iv[16], /* IV */
+    byte (*out_cbc_mac)[16], /* CBC-MAC of the result (or NULL) */
     bool encrypt);
 
 /* crc.c */
-uint32_t crc(uint8_t *data, int size);
-uint32_t crc_continue(uint32_t previous_crc, uint8_t *data, int size);
+uint32_t crc(byte *data, int size);
+uint32_t crc_continue(uint32_t previous_crc, byte *data, int size);
 
-#include "tomcrypt.h"
 /* sha1.c */
 struct sha_1_params_t
 {
-    uint8_t hash[20]; /* final hash */
-    hash_state state; /* libtomcrypt state */
+    byte hash[20]; /* final hash */
+    void *object; /* pointer to CryptoPP::SHA1 object */
 };
 
 void sha_1_init(struct sha_1_params_t *params);
-void sha_1_update(struct sha_1_params_t *params, uint8_t *buffer, int size);
+void sha_1_update(struct sha_1_params_t *params, byte *buffer, int size);
 void sha_1_finish(struct sha_1_params_t *params);
-void sha_1_output(struct sha_1_params_t *params, uint8_t *out);
+void sha_1_output(struct sha_1_params_t *params, byte *out);
 
 /* xorcrypt.c */
 

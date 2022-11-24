@@ -3,11 +3,10 @@ CC := gcc
 CXX := g++
 LD := g++
 
-TOMCRYPT_DIR := ../../tomcrypt/
-
-CFLAGS := -O3 -g -std=c99 -Wall $(shell pkg-config --cflags libusb-1.0) $(DEFINES) -I$(TOMCRYPT_DIR)/src/headers
-CXXFLAGS := -O3 -g -Wall $(DEFINES) -I$(TOMCRYPT_DIR)/src/headers
-LDFLAGS := $(shell pkg-config --libs libusb-1.0)
+LIBUSB := $(shell pkg-config --cflags libusb-1.0)
+CFLAGS := -O3 -g -std=c99 -Wall $(shell pkg-config --cflags libusb-1.0) $(DEFINES)
+CXXFLAGS := -O3 -g -Wall $(pkg-config --cflags libcrypto++) $(pkg-config --cflags libcryptopp) $(DEFINES)
+LDFLAGS := $(shell pkg-config --libs libusb-1.0) $(shell pkg-config --libs libcrypto++) $(shell pkg-config --libs libcryptopp)
 BINS := elftosb sbtoelf sbloader rsrctool elftosb1
 
 all: $(BINS)
@@ -15,10 +14,13 @@ all: $(BINS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-sbtoelf: sbtoelf.o crc.o crypto.o xorcrypt.o dbparser.o elf.o misc.o sb.o sb1.o $(TOMCRYPT_DIR)/librbtomcrypt.a
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+sbtoelf: sbtoelf.o crc.o crypto.o xorcrypt.o dbparser.o elf.o misc.o sb.o sb1.o
 	$(LD) -o $@ $^ $(LDFLAGS)
 
-elftosb: elftosb.o crc.o crypto.o elf.o dbparser.o misc.o sb.o $(TOMCRYPT_DIR)/librbtomcrypt.a
+elftosb: elftosb.o crc.o crypto.o elf.o dbparser.o misc.o sb.o
 	$(LD) -o $@ $^ $(LDFLAGS)
 
 elftosb1: elftosb1.o xorcrypt.o elf.o misc.o sb1.o
@@ -35,7 +37,3 @@ clean:
 
 veryclean:
 	rm -rf $(BINS)
-
-$(TOMCRYPT_DIR)/librbtomcrypt.a:
-	$(MAKE) -C $(TOMCRYPT_DIR)
-

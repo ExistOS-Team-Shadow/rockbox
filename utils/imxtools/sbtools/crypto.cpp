@@ -20,38 +20,51 @@
  ****************************************************************************/
 #include "crypto.h"
 #include "misc.h"
+#include <cryptopp/modes.h>
+#include <cryptopp/aes.h>
+#include <cryptopp/sha.h>
 
-#include "tomcrypt.h"
+using namespace CryptoPP;
 
-
+namespace
+{
 
 enum crypto_method_t g_cur_method = CRYPTO_NONE;
-uint8_t g_key[16];
+byte g_key[16];
+CBC_Mode<AES>::Encryption g_aes_enc;
+CBC_Mode<AES>::Decryption g_aes_dec;
+bool g_aes_enc_key_dirty; /* true of g_aes_enc key needs to be updated */
+bool g_aes_dec_key_dirty; /* same for g_aes_dec */
 
 int cbc_mac2(
-    const uint8_t *in_data, /* Input data */
-    uint8_t *out_data, /* Output data (or NULL) */
+    const byte *in_data, /* Input data */
+    byte *out_data, /* Output data (or NULL) */
     int nr_blocks, /* Number of blocks to encrypt/decrypt (one block=16 bytes) */
-    uint8_t key[16], /* Key */
-    uint8_t iv[16], /* Initialisation Vector */
-    uint8_t (*out_cbc_mac)[16], /* CBC-MAC of the result (or NULL) */
+    byte key[16], /* Key */
+    byte iv[16], /* Initialisation Vector */
+    byte (*out_cbc_mac)[16], /* CBC-MAC of the result (or NULL) */
     bool encrypt /* 1 to encrypt, 0 to decrypt */
     )
 {
-    int cipher = register_cipher(&aes_desc);
-    symmetric_CBC cbc;
-    cbc_start(cipher, iv, key, 16, 0, &cbc);
-
     /* encrypt */
     if(encrypt)
     {
-        uint8_t tmp[16];
+        /* update keys if neeeded */
+        if(g_aes_enc_key_dirty)
+        {
+            /* we need to provide an IV with the key, although we change it
+             * everytime we run the cipher anyway */
+            g_aes_enc.SetKeyWithIV(g_key, 16, iv, 16);
+            g_aes_enc_key_dirty = false;
+        }
+        g_aes_enc.Resynchronize(iv, 16);
+        byte tmp[16];
         /* we need some output buffer, either a temporary one if we are CBC-MACing
          * only, or use output buffer if available */
-        uint8_t *out_ptr = (out_data == NULL) ? tmp : out_data;
+        byte *out_ptr = (out_data == NULL) ? tmp : out_data;
         while(nr_blocks-- > 0)
         {
-            cbc_encrypt(in_data, out_ptr, 16, &cbc);
+            g_aes_enc.ProcessData(out_ptr, in_data, 16);
             /* if this is the last block, copy CBC-MAC */
             if(nr_blocks == 0 && out_cbc_mac)
                 memcpy(out_cbc_mac, out_ptr, 16);
@@ -65,17 +78,24 @@ int cbc_mac2(
     /* decrypt */
     else
     {
-        cbc_decrypt(in_data, out_data, nr_blocks * 16, &cbc);
-
         /* update keys if neeeded */
+        if(g_aes_dec_key_dirty)
+        {
+            /* we need to provide an IV with the key, although we change it
+             * everytime we run the cipher anyway */
+            g_aes_dec.SetKeyWithIV(g_key, 16, iv, 16);
+            g_aes_dec_key_dirty = false;
+        }
         /* we cannot produce a CBC-MAC in decrypt mode, output buffer exists */
         if(out_cbc_mac || out_data == NULL)
             return CRYPTO_ERROR_INVALID_OP;
-
+        g_aes_dec.Resynchronize(iv, 16);
+        g_aes_dec.ProcessData(out_data, in_data, nr_blocks * 16);
         return CRYPTO_ERROR_SUCCESS;
     }
 }
 
+}
 
 int crypto_setup(struct crypto_key_t *key)
 {
@@ -84,7 +104,8 @@ int crypto_setup(struct crypto_key_t *key)
     {
         case CRYPTO_KEY:
             memcpy(g_key, key->u.key, 16);
-
+            g_aes_dec_key_dirty = true;
+            g_aes_enc_key_dirty = true;
             return CRYPTO_ERROR_SUCCESS;
         default:
             return CRYPTO_ERROR_BADSETUP;
@@ -92,11 +113,11 @@ int crypto_setup(struct crypto_key_t *key)
 }
 
 int crypto_apply(
-    uint8_t *in_data, /* Input data */
-    uint8_t *out_data, /* Output data (or NULL) */
+    byte *in_data, /* Input data */
+    byte *out_data, /* Output data (or NULL) */
     int nr_blocks, /* Number of blocks (one block=16 bytes) */
-    uint8_t iv[16], /* Key */
-    uint8_t (*out_cbc_mac)[16], /* CBC-MAC of the result (or NULL) */
+    byte iv[16], /* Key */
+    byte (*out_cbc_mac)[16], /* CBC-MAC of the result (or NULL) */
     bool encrypt)
 {
     if(g_cur_method == CRYPTO_KEY)
@@ -107,20 +128,22 @@ int crypto_apply(
 
 void sha_1_init(struct sha_1_params_t *params)
 {
-    sha1_init(&params->state);
+    params->object = new SHA1;
 }
 
-void sha_1_update(struct sha_1_params_t *params, uint8_t *buffer, int size)
+void sha_1_update(struct sha_1_params_t *params, byte *buffer, int size)
 {
-    sha1_process(&params->state, buffer, size);
+    reinterpret_cast<SHA1 *>(params->object)->Update(buffer, size);
 }
 
 void sha_1_finish(struct sha_1_params_t *params)
 {
-    sha1_done(&params->state, params->hash);
+    SHA1 *obj = reinterpret_cast<SHA1 *>(params->object);
+    obj->Final(params->hash);
+    delete obj;
 }
 
-void sha_1_output(struct sha_1_params_t *params, uint8_t *out)
+void sha_1_output(struct sha_1_params_t *params, byte *out)
 {
     memcpy(out, params->hash, 20);
 }
